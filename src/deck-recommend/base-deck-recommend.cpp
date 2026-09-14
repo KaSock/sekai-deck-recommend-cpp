@@ -77,6 +77,17 @@ long long steadyNowNs() {
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+std::unordered_map<int, CardConfig> withoutSupportLevelOverrides(
+    const std::unordered_map<int, CardConfig>& configs
+) {
+    auto supportConfigs = configs;
+    for (auto& entry : supportConfigs) {
+        entry.second.masterRank.reset();
+        entry.second.skillLevel.reset();
+    }
+    return supportConfigs;
+}
+
 }  // namespace
 
 
@@ -436,6 +447,8 @@ void BaseDeckRecommend::materializeSupportDecks(
     const auto scoreUpLimit = isFinalChapterEvent(eventConfig.eventId)
         ? std::optional<double>(140.0)
         : std::nullopt;
+    const auto supportCardConfig = withoutSupportLevelOverrides(config.cardConfig);
+    const auto supportSingleCardConfig = withoutSupportLevelOverrides(config.singleCardConfig);
     for (auto& deck : decks) {
         if (!deck.supportDeckCards.has_value())
             continue;
@@ -454,7 +467,7 @@ void BaseDeckRecommend::materializeSupportDecks(
             if (userCard == effectiveUserCards->end())
                 continue;
             const auto details = cardCalculator.batchGetCardDetail(
-                {userCard->second}, config.cardConfig, config.singleCardConfig,
+                {userCard->second}, supportCardConfig, supportSingleCardConfig,
                 supportEventConfig, areaItemLevels, scoreUpLimit
             );
             if (details.empty())
@@ -571,23 +584,14 @@ void BaseDeckRecommend::addEventBonusCardsToPool(
             continue;
         config.singleCardConfig[eventCard.cardId] = config.bonusCardConfig;
 
-        const auto& card = findOrThrow(this->dataProvider.masterData->cards, [&](const Card& it) {
-            return it.id == eventCard.cardId;
-        }, [&]() { return "Card not found for cardId=" + std::to_string(eventCard.cardId); });
-
-        // 支援卡组读的是卡牌原始状态而非单卡配置，所以把配置直接套用到卡牌上，
-        // 让当期卡的专精/技能等级在主队伍与支援卡组两侧一致
+        // 主队配置在 singleCardConfig 中统一应用；支援保留原始专精和技能等级。
         const auto owned = std::find_if(userCards.begin(), userCards.end(), [&](const UserCard& it) {
             return it.cardId == eventCard.cardId;
         });
-        if (owned != userCards.end()) {
-            *owned = this->cardService.applyCardConfig(*owned, card, config.bonusCardConfig);
+        if (owned != userCards.end())
             continue;
-        }
         // 未拥有的生成虚拟卡加入卡池
-        userCards.push_back(this->cardService.applyCardConfig(
-            makeVirtualUserCard(eventCard.cardId), card, config.bonusCardConfig
-        ));
+        userCards.push_back(makeVirtualUserCard(eventCard.cardId));
     }
 }
 
@@ -614,10 +618,13 @@ RecommendResult BaseDeckRecommend::recommendHighScoreDeck(
             cardConfig = config.singleCardConfig.at(userCard.cardId);
         else if (config.cardConfig.count(cardIt->cardRarityType))
             cardConfig = config.cardConfig.at(cardIt->cardRarityType);
-        if (!cardConfig.disable)
+        if (!cardConfig.disable) {
+            cardConfig.masterRank.reset();
+            cardConfig.skillLevel.reset();
             (*effectiveUserCardsSnapshot)[userCard.cardId] = cardService.applyCardConfig(
                 userCard, *cardIt, cardConfig
             );
+        }
     }
     effectiveUserCards = std::move(effectiveUserCardsSnapshot);
 

@@ -129,7 +129,7 @@ class BaseDeckRecommend {
     CardService cardService;
     LiveCalculator liveCalculator;
     AreaItemService areaItemService;
-    // 当前推荐请求的有效用户卡状态；包含全当期生成的虚拟卡，供 WL sub 物化复用。
+    // 当前请求的支援卡状态；应用过滤及其它配置，但保留用户原始专精和技能等级。
     std::shared_ptr<const std::unordered_map<int, UserCard>> effectiveUserCards{};
 
 public:
@@ -150,8 +150,8 @@ public:
 
     /**
      * 全当期：把本活动全部加成卡（bonusRate>0）视为已拥有。
-     * 未拥有的生成虚拟卡加入卡池，并把 bonusCardConfig 直接套用到卡牌状态上
-     * （支援卡组读的是卡牌原始状态，这样WL支援加成同样按该配置计算）。
+     * 未拥有的生成虚拟卡加入卡池，bonusCardConfig 通过 singleCardConfig 应用于主队计算；
+     * 支援卡组保留原始专精和技能等级。
      * 已在 singleCardConfig 里显式配置过的卡牌不受影响。
      */
     void addEventBonusCardsToPool(

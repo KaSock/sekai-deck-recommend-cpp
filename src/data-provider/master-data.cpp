@@ -340,7 +340,34 @@ void addFinalChapter2EventIfNeeded(MasterData& md) {
             md.eventDeckBonuses.push_back(bonus);
         }
 
-        // wl3限定卡牌加成：动态选取真实WL3章节活动的当期卡，第5章数据落地后自动包含
+        // 支援额外加成：真实WL3活动已包含对应角色的WL1/WL2卡规则，
+        // 终章需要继承这些规则；下面再补上本轮WL3卡。
+        std::set<std::pair<int, int>> supportLimitedCards;
+        std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> previousLimitedBonuses{};
+        for (const auto& limitedBonus : md.worldBloomSupportDeckUnitEventLimitedBonuses) {
+            if (limitedBonus.eventId >= 1000 ||
+                md.getWorldBloomEventTurn(limitedBonus.eventId) != 3) {
+                continue;
+            }
+            const auto eventIt = std::find_if(md.events.begin(), md.events.end(), [&](const Event& current) {
+                return current.id == limitedBonus.eventId;
+            });
+            if (eventIt == md.events.end() || eventIt->eventType != Enums::EventType::world_bloom)
+                continue;
+
+            auto finalBonus = limitedBonus;
+            finalBonus.eventId = finalChapter2EventId;
+            const auto key = std::make_pair(finalBonus.gameCharacterId, finalBonus.cardId);
+            if (supportLimitedCards.insert(key).second)
+                previousLimitedBonuses.push_back(finalBonus);
+        }
+        md.worldBloomSupportDeckUnitEventLimitedBonuses.insert(
+            md.worldBloomSupportDeckUnitEventLimitedBonuses.end(),
+            previousLimitedBonuses.begin(),
+            previousLimitedBonuses.end()
+        );
+
+        // 主队限定卡牌加成：只选取真实WL3章节活动的当期卡，第5组数据落地后自动包含
         std::set<int> limitedCardIds;
         std::vector<EventCard> newEventCards{};
         for (const auto& eventCard : md.eventCards) {
@@ -372,7 +399,8 @@ void addFinalChapter2EventIfNeeded(MasterData& md) {
             supportBonus.gameCharacterId = cardIt->characterId;
             supportBonus.cardId = eventCard.cardId;
             supportBonus.bonusRate = 20.0;
-            md.worldBloomSupportDeckUnitEventLimitedBonuses.push_back(supportBonus);
+            if (supportLimitedCards.insert({supportBonus.gameCharacterId, supportBonus.cardId}).second)
+                md.worldBloomSupportDeckUnitEventLimitedBonuses.push_back(supportBonus);
         }
         md.eventCards.insert(md.eventCards.end(), newEventCards.begin(), newEventCards.end());
     }
