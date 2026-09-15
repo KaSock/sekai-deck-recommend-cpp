@@ -579,10 +579,10 @@ void BaseDeckRecommend::addEventBonusCardsToPool(
     for (const auto& eventCard : this->dataProvider.masterData->eventCards) {
         if (eventCard.eventId != eventId || eventCard.bonusRate <= 0)
             continue;
-        // 显式指定的单卡配置优先，这类卡完全不受全当期配置影响
-        if (config.singleCardConfig.count(eventCard.cardId))
-            continue;
-        config.singleCardConfig[eventCard.cardId] = config.bonusCardConfig;
+        // 显式指定的单卡配置优先，不使用全当期的统一配置；但无论是否显式配置，
+        // 全当期都必须确保未拥有的活动卡被加入虚拟卡池。
+        if (!config.singleCardConfig.count(eventCard.cardId))
+            config.singleCardConfig[eventCard.cardId] = config.bonusCardConfig;
 
         // 主队配置在 singleCardConfig 中统一应用；支援保留原始专精和技能等级。
         const auto owned = std::find_if(userCards.begin(), userCards.end(), [&](const UserCard& it) {
