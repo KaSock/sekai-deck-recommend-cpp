@@ -79,7 +79,8 @@ bool dfsWorldBloomBonus(
     const std::array<int, 6>& diffAttrBonus,
     const int maxAttrBonus,
     const uint32_t requiredCharacters,
-    const std::set<int>& requiredKeys
+    const std::set<int>& requiredKeys,
+    const std::function<bool(const std::vector<int>&, int)>& onComplete = {}
 )
 {
     int diffAttrCount = 0;
@@ -94,6 +95,8 @@ bool dfsWorldBloomBonus(
             if (std::find(current.begin(), current.end(), key) == current.end())
                 return targets.size() > 0;
         int realCurrentBonus = currentBonus + currentDiffAttrBonus;
+        if (onComplete && targets.count(realCurrentBonus))
+            return onComplete(current, realCurrentBonus);
         if (targets.count(realCurrentBonus)) {
             result[realCurrentBonus].push_back(current);
             if (result[realCurrentBonus].size() == config.limit)
@@ -162,7 +165,8 @@ bool dfsWorldBloomBonus(
         bool cont = dfsWorldBloomBonus(
             config, dfsInfo, targets,
             currentBonus + bonus, current, result, hasBonusCharaCards, charaVis,
-            attrVis, diffAttrBonus, maxAttrBonus, requiredCharacters, requiredKeys
+            attrVis, diffAttrBonus, maxAttrBonus, requiredCharacters, requiredKeys,
+            onComplete
         );
         if (!cont) return false;
 
@@ -188,9 +192,6 @@ void BaseDeckRecommend::findWorldBloomTargetBonusCardsDFS(
     const std::vector<CardDetail>& fixedCards
 )
 {
-    if (isFinalChapterEvent(eventId.value_or(0)))
-        throw std::invalid_argument("final chapter event is not supported for bonus target");
-
     std::vector<int> bonusList = config.bonusList;
     for (auto& x : bonusList) x *= 2;
     std::sort(bonusList.begin(), bonusList.end());
@@ -202,7 +203,17 @@ void BaseDeckRecommend::findWorldBloomTargetBonusCardsDFS(
         throw std::runtime_error("this func is only used for world bloom event");
     }
 
-    // 按照加成*2和角色类型和卡牌颜色归类
+    const bool isFinalChapter = isFinalChapterEvent(eventId.value_or(0));
+    const bool isFinalChapter2 = eventId.value_or(0) == finalChapter2EventId;
+    const auto getSearchBonus = [isFinalChapter](const CardDetail& card) {
+        double bonus = card.maxEventBonus.value_or(0.0);
+        if (isFinalChapter)
+            bonus -= card.leaderHonorEventBonus.value_or(0.0)
+                  + card.leaderLimitEventBonus.value_or(0.0);
+        return bonus;
+    };
+
+    // 按照非队长加成*2、角色和卡牌颜色归类。
     std::map<int, std::vector<const CardDetail *>> bonusCharaCards;
     std::set<int> fixedCardIds{};
     std::map<int, const CardDetail*> fixedCardByCharacter{};
@@ -211,8 +222,11 @@ void BaseDeckRecommend::findWorldBloomTargetBonusCardsDFS(
         fixedCardByCharacter[card.characterId] = &card;
     }
     for (const auto &card : cardDetails) {
-        const double eventBonus = card.maxEventBonus.value_or(0.0);
-        if (eventBonus > 0 || fixedCardIds.count(card.cardId)) {
+        const double eventBonus = getSearchBonus(card);
+        const bool hasLeaderBonus = isFinalChapter &&
+            card.leaderHonorEventBonus.value_or(0.0) +
+            card.leaderLimitEventBonus.value_or(0.0) > 0.0;
+        if (eventBonus > 0 || hasLeaderBonus || fixedCardIds.count(card.cardId)) {
             if (std::abs(std::round(eventBonus * 2) - eventBonus * 2) > 1e-6)
                 continue;
             int bonus = std::round(eventBonus * 2);
@@ -243,8 +257,46 @@ void BaseDeckRecommend::findWorldBloomTargetBonusCardsDFS(
         maxAttrBonus = std::max(maxAttrBonus, rounded);
     }
 
-    // 剩余的组卡目标
+    // 普通WL可以直接按卡牌加成和异色加成搜索。终章的队长称号、队长当期卡、
+    // 终章2组合加成以及终章1当期卡上限都要在实际卡组上计算，因此先反推出
+    // 可能的“非队长基础加成”目标，取卡后再用真实加成核对。
     std::set<int> targets(bonusList.begin(), bonusList.end());
+    std::map<int, int> remainingFinalTargets;
+    if (isFinalChapter) {
+        std::set<int> leaderBonuses{0};
+        for (const auto& card : cardDetails) {
+            leaderBonuses.insert(static_cast<int>(std::round(
+                (card.leaderHonorEventBonus.value_or(0.0)
+                 + card.leaderLimitEventBonus.value_or(0.0)) * 2
+            )));
+        }
+
+        std::set<int> differentAttributeBonuses{0};
+        for (const auto& bonus : worldBloomDifferentAttributeBonuses)
+            differentAttributeBonuses.insert(static_cast<int>(std::round(bonus.bonusRate * 2)));
+
+        std::set<int> shuffleUnitBonuses{0};
+        if (isFinalChapter2)
+            shuffleUnitBonuses = {0, 20, 60, 100};
+
+        std::set<int> limitedCapBonuses{0};
+        if (eventId.value_or(0) == finalChapterEventId)
+            limitedCapBonuses.insert(50); // 第五张当期卡扣除25%
+
+        targets.clear();
+        for (const int target : bonusList) {
+            remainingFinalTargets[target] = limit;
+            for (const int leaderBonus : leaderBonuses)
+                for (const int attrBonus : differentAttributeBonuses)
+                    for (const int shuffleBonus : shuffleUnitBonuses)
+                        for (const int limitedCap : limitedCapBonuses) {
+                            const int baseBonus = target - leaderBonus - attrBonus
+                                - shuffleBonus + limitedCap;
+                            if (baseBonus >= 0)
+                                targets.insert(baseBonus);
+                        }
+        }
+    }
     uint32_t requiredCharacters = 0;
     for (const auto characterId : config.fixedCharacters)
         requiredCharacters |= uint32_t{1} << characterId;
@@ -254,9 +306,60 @@ void BaseDeckRecommend::findWorldBloomTargetBonusCardsDFS(
         requiredKeys.insert(getCharaAttrBonusKey(
             card.characterId,
             card.attr,
-            std::round(card.maxEventBonus.value_or(0.0) * 2)
+            std::round(getSearchBonus(card) * 2)
         ));
     }
+
+    const auto makeCardGroups = [&](const std::vector<int>& resultKeys) {
+        std::vector<int> orderedKeys{};
+        orderedKeys.reserve(resultKeys.size());
+        for (const auto characterId : config.fixedCharacters) {
+            auto it = std::find_if(
+                resultKeys.begin(), resultKeys.end(),
+                [characterId](int key) { return getChara(key) == characterId; }
+            );
+            if (it != resultKeys.end())
+                orderedKeys.push_back(*it);
+        }
+        for (const auto key : resultKeys) {
+            if (std::find(orderedKeys.begin(), orderedKeys.end(), key) == orderedKeys.end())
+                orderedKeys.push_back(key);
+        }
+
+        std::vector<std::vector<const CardDetail*>> cardGroups{};
+        cardGroups.reserve(orderedKeys.size());
+        for (const auto key : orderedKeys) {
+            auto fixed = fixedCardByCharacter.find(getChara(key));
+            if (fixed != fixedCardByCharacter.end())
+                cardGroups.push_back({fixed->second});
+            else
+                cardGroups.push_back(bonusCharaCards[key]);
+        }
+        return cardGroups;
+    };
+
+    // 终章不再把某个“非队长基础加成”组合当成最终答案。相同基础加成
+    // 可能对应不同的队长卡，必须逐个交给实际加成计算，直到目标命中。
+    const auto finalComplete = [&](const std::vector<int>& resultKeys, int) {
+        auto cardGroups = makeCardGroups(resultKeys);
+        for (auto targetIt = remainingFinalTargets.begin();
+             targetIt != remainingFinalTargets.end(); ) {
+            auto deckRes = findBestBonusCardCombination(
+                liveType, config, cardGroups, scoreFunc,
+                eventType, eventId, targetIt->first / 2.0
+            );
+            if (!deckRes.has_value()) {
+                ++targetIt;
+                continue;
+            }
+            dfsInfo.update(deckRes.value(), 1e9);
+            if (--targetIt->second <= 0)
+                targetIt = remainingFinalTargets.erase(targetIt);
+            else
+                ++targetIt;
+        }
+        return !remainingFinalTargets.empty();
+    };
 
     // 按照不同层级过滤进行分层搜索
     for(auto& filter : bonusFilters) {
@@ -266,54 +369,43 @@ void BaseDeckRecommend::findWorldBloomTargetBonusCardsDFS(
         std::map<int, std::vector<std::vector<int>>> result;
         uint32_t charaVis = 0;
         std::array<int, 10> attrVis = {};
+        const std::array<int, 6> searchDiffAttrBonus = isFinalChapter
+            ? std::array<int, 6>{}
+            : diffAttrBonus;
+        const std::function<bool(const std::vector<int>&, int)> completion =
+            isFinalChapter
+                ? std::function<bool(const std::vector<int>&, int)>(finalComplete)
+                : std::function<bool(const std::vector<int>&, int)>{};
         dfsWorldBloomBonus(
             config, dfsInfo, targets,
             0, current, result, filteredHasBonusCharaCards, charaVis,
-            attrVis, diffAttrBonus, maxAttrBonus, requiredCharacters, requiredKeys
+            attrVis, searchDiffAttrBonus, isFinalChapter ? 0 : maxAttrBonus,
+            requiredCharacters, requiredKeys, completion
         );
 
         // 取卡
         for (auto& [bonus, bonusResult] : result) {
             for (auto &resultKeys : bonusResult) {
-                std::vector<int> orderedKeys{};
-                orderedKeys.reserve(resultKeys.size());
-                for (const auto characterId : config.fixedCharacters) {
-                    auto it = std::find_if(
-                        resultKeys.begin(), resultKeys.end(),
-                        [characterId](int key) { return getChara(key) == characterId; }
+                if (!isFinalChapter) {
+                    auto cardGroups = makeCardGroups(resultKeys);
+                    auto deckRes = findBestBonusCardCombination(
+                        liveType, config, cardGroups, scoreFunc, eventType, eventId
                     );
-                    if (it != resultKeys.end())
-                        orderedKeys.push_back(*it);
-                }
-                for (const auto key : resultKeys) {
-                    if (std::find(orderedKeys.begin(), orderedKeys.end(), key) == orderedKeys.end())
-                        orderedKeys.push_back(key);
-                }
-                std::vector<std::vector<const CardDetail*>> cardGroups{};
-                cardGroups.reserve(orderedKeys.size());
-                for (const auto key : orderedKeys) {
-                    auto fixed = fixedCardByCharacter.find(getChara(key));
-                    if (fixed != fixedCardByCharacter.end())
-                        cardGroups.push_back({fixed->second});
+                    if (!deckRes.has_value())
+                        continue;
+                    // 需要验证加成正确
+                    if(std::abs(deckRes->eventBonus.value_or(0) * 2 - bonus) < 1e-6)
+                        dfsInfo.update(deckRes.value(), 1e9);
                     else
-                        cardGroups.push_back(bonusCharaCards[key]);
+                        std::cerr << "Warning: World Bloom bonus mismatch, expected "
+                                << bonus / 2.0 << ", got "
+                                << deckRes->eventBonus.value_or(0) << std::endl;
                 }
-                auto deckRes = findBestBonusCardCombination(
-                    liveType, config, cardGroups, scoreFunc, eventType, eventId
-                );
-                if (!deckRes.has_value())
-                    continue;
-                // 需要验证加成正确
-                if(std::abs(deckRes->eventBonus.value_or(0) * 2 - bonus) < 1e-6)
-                    dfsInfo.update(deckRes.value(), 1e9);
-                else
-                    std::cerr << "Warning: World Bloom bonus mismatch, expected "
-                            << bonus / 2.0 << ", got " 
-                            << deckRes->eventBonus.value_or(0) << std::endl;
             }
         }
 
-        if (targets.empty()) {
+        if ((isFinalChapter && remainingFinalTargets.empty())
+            || (!isFinalChapter && targets.empty())) {
             // 如果已经找到所有目标，退出
             break;
         }

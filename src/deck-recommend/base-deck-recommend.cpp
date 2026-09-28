@@ -512,34 +512,55 @@ std::optional<RecommendDeck> BaseDeckRecommend::findBestBonusCardCombination(
     const std::vector<std::vector<const CardDetail*>>& cardGroups,
     const std::function<Score(const DeckScoreDetail&)>& scoreFunc,
     std::optional<int> eventType,
-    std::optional<int> eventId
+    std::optional<int> eventId,
+    std::optional<double> targetBonus
 ) {
     SupportDeckMap emptySupportCards{};
-    std::vector<const CardDetail*> deckCards(cardGroups.size());
     std::optional<RecommendDeck> bestDeck{};
-    const auto search = [&](const auto& self, std::size_t position) -> void {
-        if (position == cardGroups.size()) {
-            auto best = getBestPermutation(
-                deckCalculator, deckCards,
-                emptySupportCards, scoreFunc, 0, eventType, eventId, liveType, config
-            );
-            if (!best.bestCandidate.has_value())
+    const auto searchGroups = [&](const std::vector<std::vector<const CardDetail*>>& groups) {
+        std::vector<const CardDetail*> deckCards(groups.size());
+        const auto search = [&](const auto& self, std::size_t position) -> void {
+            if (position == groups.size()) {
+                auto best = getBestPermutation(
+                    deckCalculator, deckCards,
+                    emptySupportCards, scoreFunc, 0, eventType, eventId, liveType, config
+                );
+                if (!best.bestCandidate.has_value())
+                    return;
+                auto deck = materializeCandidate(
+                    deckCalculator, deckCards, emptySupportCards, 0,
+                    eventType, eventId, config, best.bestCandidate.value()
+                );
+                if (targetBonus.has_value()
+                    && std::abs(deck.eventBonus.value_or(0.0) - targetBonus.value()) > 1e-6)
+                    return;
+                if (!bestDeck.has_value() || deck > bestDeck.value())
+                    bestDeck = std::move(deck);
                 return;
-            auto deck = materializeCandidate(
-                deckCalculator, deckCards,
-                emptySupportCards, 0, eventType, eventId,
-                config, best.bestCandidate.value()
-            );
-            if (!bestDeck.has_value() || deck > bestDeck.value())
-                bestDeck = std::move(deck);
-            return;
-        }
-        for (const auto* card : cardGroups[position]) {
-            deckCards[position] = card;
-            self(self, position + 1);
-        }
+            }
+            for (const auto* card : groups[position]) {
+                deckCards[position] = card;
+                self(self, position + 1);
+            }
+        };
+        search(search, 0);
     };
-    search(search, 0);
+
+    if (isFinalChapterEvent(eventId.value_or(0)) && cardGroups.size() > 1) {
+        // 终章的加成依赖队长。每个卡槽都作为队长运行一次实际计算。
+        for (std::size_t leader = 0; leader < cardGroups.size(); ++leader) {
+            std::vector<std::vector<const CardDetail*>> groups;
+            groups.reserve(cardGroups.size());
+            groups.push_back(cardGroups[leader]);
+            for (std::size_t i = 0; i < cardGroups.size(); ++i)
+                if (i != leader)
+                    groups.push_back(cardGroups[i]);
+            searchGroups(groups);
+        }
+    }
+    else {
+        searchGroups(cardGroups);
+    }
     return bestDeck;
 }
 

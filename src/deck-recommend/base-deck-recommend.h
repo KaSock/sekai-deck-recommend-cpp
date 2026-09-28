@@ -199,7 +199,8 @@ public:
         const std::vector<std::vector<const CardDetail*>>& cardGroups,
         const std::function<Score(const DeckScoreDetail&)>& scoreFunc,
         std::optional<int> eventType,
-        std::optional<int> eventId
+        std::optional<int> eventId,
+        std::optional<double> targetBonus = std::nullopt
     );
 
     /**
