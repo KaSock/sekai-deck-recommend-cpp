@@ -2,6 +2,8 @@
 #include "common/timer.h"
 #include "deck-calculator.h"
 #include <bit>
+#include <algorithm>
+#include <cstdint>
 
 
 namespace {
@@ -317,9 +319,34 @@ int DeckCalculator::getHonorBonusPower()
     return bonus;
 }
 
+bool DeckCalculator::isMultiUnitDeck(const std::vector<const CardDetail*>& cardDetails)
+{
+    auto bit = [](int unit) -> uint64_t {
+        return unit >= 0 && unit < 64 ? (uint64_t{1} << unit) : 0;
+    };
+    uint64_t units = 0;
+    for (const auto* card : cardDetails) {
+        if (card->characterUnit != Enums::Unit::piapro)
+            units |= bit(card->characterUnit);
+    }
+    bool needVirtualSinger = false;
+    for (const auto* card : cardDetails) {
+        if (card->characterUnit != Enums::Unit::piapro)
+            continue;
+        if (card->supportUnit == Enums::Unit::none || (units & bit(card->supportUnit)))
+            needVirtualSinger = true;
+        else
+            units |= bit(card->supportUnit);
+    }
+    if (needVirtualSinger)
+        units |= bit(Enums::Unit::piapro);
+    return std::popcount(units) > 1;
+}
+
 DeckPowerCalculation DeckCalculator::getDeckPowerByCards(
     const std::vector<const CardDetail*>& cardDetails,
-    int honorBonus
+    int honorBonus,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
     DeckPowerCalculation result{};
@@ -331,14 +358,28 @@ DeckPowerCalculation DeckCalculator::getDeckPowerByCards(
             ++result.unitCounts[unit];
         }
     }
+    const bool hasMultiUnitPower = !cardDetails.empty() && std::all_of(cardDetails.begin(), cardDetails.end(), [](const CardDetail* card) {
+        return !card->multiUnitPower.empty();
+    });
+    const bool useMultiUnitPower = hasMultiUnitPower && multiUnitEval != MultiUnitBonusEvaluation::ForceOff &&
+        (multiUnitEval == MultiUnitBonusEvaluation::ForceOn || isMultiUnitDeck(cardDetails));
     for (size_t i = 0; i < cardDetails.size(); ++i) {
         const auto& card = *cardDetails[i];
         DeckCardPowerDetail power{};
-        for (auto units = card.unitMask; units; units &= units - 1) {
-            const auto unit = std::countr_zero(units);
-            const auto& current = card.power.get(unit, result.unitCounts[unit], attrMap[card.attr]);
-            if (current.total > power.total)
-                power = current;
+        if (useMultiUnitPower) {
+            const int index = multiUnitPowerIndex(
+                result.unitCounts[card.characterUnit] == 5,
+                card.supportUnit != Enums::Unit::none && result.unitCounts[card.supportUnit] == 5,
+                attrMap[card.attr] == 5
+            );
+            power = card.multiUnitPower[index];
+        } else {
+            for (auto units = card.unitMask; units; units &= units - 1) {
+                const auto unit = std::countr_zero(units);
+                const auto& current = card.power.get(unit, result.unitCounts[unit], attrMap[card.attr]);
+                if (current.total > power.total)
+                    power = current;
+            }
         }
         result.cards[i] = power;
         result.total.base += power.base;
@@ -355,9 +396,33 @@ DeckPowerCalculation DeckCalculator::getDeckPowerByCards(
 
 int DeckCalculator::getDeckTotalPowerByCards(
     const std::vector<const CardDetail*>& cardDetails,
-    int honorBonus
+    int honorBonus,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
+    const bool hasMultiUnitPower = !cardDetails.empty() && std::all_of(cardDetails.begin(), cardDetails.end(), [](const CardDetail* card) {
+        return !card->multiUnitPower.empty();
+    });
+    if (hasMultiUnitPower && multiUnitEval != MultiUnitBonusEvaluation::ForceOff &&
+        (multiUnitEval == MultiUnitBonusEvaluation::ForceOn || isMultiUnitDeck(cardDetails))) {
+        int attrMap[16] = {};
+        std::array<int, 16> unitCounts{};
+        for (const auto* card : cardDetails) {
+            ++attrMap[card->attr];
+            ++unitCounts[card->characterUnit];
+            if (card->supportUnit != Enums::Unit::none)
+                ++unitCounts[card->supportUnit];
+        }
+        int total = honorBonus;
+        for (const auto* card : cardDetails) {
+            total += card->multiUnitPower[multiUnitPowerIndex(
+                unitCounts[card->characterUnit] == 5,
+                card->supportUnit != Enums::Unit::none && unitCounts[card->supportUnit] == 5,
+                attrMap[card->attr] == 5
+            )].total;
+        }
+        return total;
+    }
     const bool fullDeck = cardDetails.size() == 5;
     uint16_t commonUnitMask = fullDeck ? (uint16_t{1} << UNIT_MAX) - 1 : 0;
     const int deckAttr = fullDeck ? cardDetails[0]->attr : 0;
@@ -402,7 +467,8 @@ void DeckCalculator::forEachDeckState(
     SkillReferenceChooseStrategy skillReferenceChooseStrategy,
     bool keepAfterTrainingState,
     bool bestSkillAsLeader,
-    bool slimPower
+    bool slimPower,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
     // 活动加成
@@ -433,11 +499,23 @@ void DeckCalculator::forEachDeckState(
                 ++powerCalculation.unitCounts[std::countr_zero(units)];
         }
         int total = honorBonus;
+        const bool hasMultiUnitPower = !cardDetails.empty() && std::all_of(cardDetails.begin(), cardDetails.end(), [](const CardDetail* card) {
+            return !card->multiUnitPower.empty();
+        });
+        const bool useMultiUnitPower = hasMultiUnitPower && multiUnitEval != MultiUnitBonusEvaluation::ForceOff &&
+            (multiUnitEval == MultiUnitBonusEvaluation::ForceOn || isMultiUnitDeck(cardDetails));
         for (const auto* card : cardDetails) {
             const int attrState = attrMap[card->attr] == 5 ? 1 : 0;
             int best = 0;
+            if (useMultiUnitPower) {
+                best = card->multiUnitPower[multiUnitPowerIndex(
+                    powerCalculation.unitCounts[card->characterUnit] == 5,
+                    card->supportUnit != Enums::Unit::none && powerCalculation.unitCounts[card->supportUnit] == 5,
+                    attrState == 1
+                )].total;
+            }
             int slot = 0;
-            for (auto units = card->unitMask; units; units &= units - 1, ++slot) {
+            for (auto units = card->unitMask; units && !useMultiUnitPower; units &= units - 1, ++slot) {
                 const auto unit = std::countr_zero(units);
                 const int state = (powerCalculation.unitCounts[unit] == 5 ? 2 : 0) + attrState;
                 best = std::max(best, card->powerTotals[slot][state]);
@@ -447,7 +525,7 @@ void DeckCalculator::forEachDeckState(
         powerCalculation.total.total = total;
     }
     else {
-        powerCalculation = getDeckPowerByCards(cardDetails, honorBonus);
+        powerCalculation = getDeckPowerByCards(cardDetails, honorBonus, multiUnitEval);
     }
     if (eventType == Enums::EventType::world_bloom &&
         this->dataProvider.masterData->getWorldBloomEventTurn(eventId.value_or(0)) == 3) {
@@ -500,7 +578,8 @@ void DeckCalculator::forEachMultiLiveScoreState(
     std::optional<int> eventId,
     SkillReferenceChooseStrategy skillReferenceChooseStrategy,
     bool keepAfterTrainingState,
-    bool bestSkillAsLeader
+    bool bestSkillAsLeader,
+    MultiUnitBonusEvaluation multiUnitEval
 ) {
     const auto eventBonus = getDeckBonus(cardDetails, eventType, eventId).totalBonus;
 
@@ -525,12 +604,24 @@ void DeckCalculator::forEachMultiLiveScoreState(
         for (auto units = card->unitMask; units; units &= units - 1)
             ++unitCounts[std::countr_zero(units)];
     }
+    const bool hasMultiUnitPower = !cardDetails.empty() && std::all_of(cardDetails.begin(), cardDetails.end(), [](const CardDetail* card) {
+        return !card->multiUnitPower.empty();
+    });
+    const bool useMultiUnitPower = hasMultiUnitPower && multiUnitEval != MultiUnitBonusEvaluation::ForceOff &&
+        (multiUnitEval == MultiUnitBonusEvaluation::ForceOn || isMultiUnitDeck(cardDetails));
     int power = honorBonus;
     for (const auto* card : cardDetails) {
         const int attrState = attrMap[card->attr] == 5 ? 1 : 0;
         int best = 0;
+        if (useMultiUnitPower) {
+            best = card->multiUnitPower[multiUnitPowerIndex(
+                unitCounts[card->characterUnit] == 5,
+                card->supportUnit != Enums::Unit::none && unitCounts[card->supportUnit] == 5,
+                attrState == 1
+            )].total;
+        }
         int slot = 0;
-        for (auto units = card->unitMask; units; units &= units - 1, ++slot) {
+        for (auto units = card->unitMask; units && !useMultiUnitPower; units &= units - 1, ++slot) {
             const int unit = std::countr_zero(units);
             const int state = (unitCounts[unit] == 5 ? 2 : 0) + attrState;
             best = std::max(best, card->powerTotals[slot][state]);
@@ -581,7 +672,8 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
     SkillReferenceChooseStrategy skillReferenceChooseStrategy,
     bool keepAfterTrainingState,
     bool bestSkillAsLeader,
-    std::optional<int> selectedStatusMask
+    std::optional<int> selectedStatusMask,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
     std::vector<DeckDetail> ret{};
@@ -658,7 +750,9 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
         eventId,
         skillReferenceChooseStrategy,
         keepAfterTrainingState,
-        bestSkillAsLeader
+        bestSkillAsLeader,
+        /*slimPower=*/false,
+        multiUnitEval
     );
 
     return ret;

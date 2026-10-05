@@ -31,6 +31,17 @@ struct DeckCardPowerDetail {
 
 // A card has at most two units, each with four unit/attribute states.
 using CardPowerDetailMap = CardDetailMap<DeckCardPowerDetail, 8>;
+
+enum class MultiUnitBonusEvaluation {
+    ByDeck,
+    ForceOn,
+    ForceOff,
+};
+
+inline int multiUnitPowerIndex(bool characterUnitAllMatch, bool supportUnitAllMatch, bool attrAllMatch) {
+    return (characterUnitAllMatch ? 4 : 0) | (supportUnitAllMatch ? 2 : 0) | (attrAllMatch ? 1 : 0);
+}
+constexpr int MULTI_UNIT_POWER_SIZE = 8;
   
 class CardPowerCalculator {
 
@@ -56,7 +67,8 @@ public:
         const std::vector<AreaItemLevel>& userAreaItemLevels,
         bool hasCanvasBonus,
         const std::vector<MysekaiGateBonus>& userGateBonuses,
-        std::optional<int> fixtureBonusLimit = std::nullopt
+        std::optional<int> fixtureBonusLimit = std::nullopt,
+        std::vector<DeckCardPowerDetail>* multiUnitPower = nullptr
     );
     
     /**
@@ -116,6 +128,17 @@ public:
         bool sameAttr
     );
 
+    int getMultiUnitAreaItemBonusPower(
+        const std::vector<AreaItemLevel>& userAreaItemLevels,
+        const BasePower& basePower,
+        const Card& card,
+        int characterUnit,
+        int supportUnit,
+        bool characterUnitAllMatch,
+        bool supportUnitAllMatch,
+        bool attrAllMatch
+    );
+
     /**
      * 获取卡牌角色加成综合力
      * @param basePower 卡牌基础综合力
@@ -139,7 +162,7 @@ public:
 
     /**
      * 自定义世界的大门加成
-     * 如果是无应援的V家角色，按最大加成算
+     * 有支援组合的卡按支援组合选门；无支援组合的V家卡按等级最高的门选取
      * @param basePower 基础综合
      * @param userGateBonuses 当前生效的门加成
      * @param cardUnits 当前卡有的组合

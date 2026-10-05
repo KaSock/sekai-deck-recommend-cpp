@@ -1,4 +1,7 @@
 #include "mysekai-information/mysekai-service.h"
+#include "common/common-enums.h"
+
+#include <algorithm>
 
 std::unordered_set<int> MySekaiService::getMysekaiCanvasBonusCards()
 {
@@ -21,15 +24,17 @@ std::vector<MysekaiGateBonus> MySekaiService::getMysekaiGateBonuses()
     auto& mysekaiGateLevels = this->dataProvider.masterData->mysekaiGateLevels;
     std::vector<MysekaiGateBonus> result = {};
     for (auto& it : userMysekaiGates) {
-        auto& gate = findOrThrow(mysekaiGates, [&](const MysekaiGate& g) {
+        auto gate = std::find_if(mysekaiGates.begin(), mysekaiGates.end(), [&](const MysekaiGate& g) {
             return g.id == it.mysekaiGateId;
-        }, [&]() { return "Mysekai gate not found for mysekaiGateId=" + std::to_string(it.mysekaiGateId); });
-        auto& gateLevel = findOrThrow(mysekaiGateLevels, [&](const MysekaiGateLevel& l) {
+        });
+        auto gateLevel = std::find_if(mysekaiGateLevels.begin(), mysekaiGateLevels.end(), [&](const MysekaiGateLevel& l) {
             return l.mysekaiGateId == it.mysekaiGateId && l.level == it.mysekaiGateLevel;
-        }, [&]() { return "Mysekai gate level not found for mysekaiGateId=" + std::to_string(it.mysekaiGateId) + " level=" + std::to_string(it.mysekaiGateLevel); });
+        });
         result.push_back(MysekaiGateBonus{
-            gate.unit,
-            gateLevel.powerBonusRate
+            it.mysekaiGateId,
+            gate != mysekaiGates.end() ? gate->unit : Enums::Unit::none,
+            it.mysekaiGateLevel,
+            gateLevel != mysekaiGateLevels.end() ? gateLevel->powerBonusRate : 0.0
         });
     }
     return result;

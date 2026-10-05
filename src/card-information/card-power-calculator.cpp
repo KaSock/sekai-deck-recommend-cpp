@@ -1,5 +1,8 @@
 #include "card-information/card-power-calculator.h"
 
+#include <algorithm>
+#include <cmath>
+
 CardPowerDetailMap CardPowerCalculator::getCardPower(
     const UserCard &userCard, 
     const Card &card, 
@@ -7,7 +10,8 @@ CardPowerDetailMap CardPowerCalculator::getCardPower(
     const std::vector<AreaItemLevel> &userAreaItemLevels, 
     bool hasCanvasBonus, 
     const std::vector<MysekaiGateBonus> &userGateBonuses,
-    std::optional<int> fixtureBonusLimit
+    std::optional<int> fixtureBonusLimit,
+    std::vector<DeckCardPowerDetail>* multiUnitPower
 )
 {
     auto ret = CardPowerDetailMap();
@@ -30,6 +34,34 @@ CardPowerDetailMap CardPowerCalculator::getCardPower(
         ret.set(unit, 1, 1, power.total, power);
     }
     ret.finalize();
+
+    const bool hasMultiUnitEffect = std::any_of(userAreaItemLevels.begin(), userAreaItemLevels.end(), [](const AreaItemLevel& it) {
+        return it.targetUnit == Enums::Unit::multi_unit;
+    });
+    if (multiUnitPower != nullptr && hasMultiUnitEffect) {
+        const int characterUnit = cardUnits.back();
+        const int supportUnit = cardUnits.size() > 1 ? cardUnits.front() : Enums::Unit::none;
+        const int base = sumPower(basePower);
+        multiUnitPower->assign(MULTI_UNIT_POWER_SIZE, DeckCardPowerDetail{});
+        for (int mask = 0; mask < MULTI_UNIT_POWER_SIZE; ++mask) {
+            const bool characterUnitAllMatch = (mask & 4) != 0;
+            const bool supportUnitAllMatch = (mask & 2) != 0;
+            const bool attrAllMatch = (mask & 1) != 0;
+            const int areaItemBonus = getMultiUnitAreaItemBonusPower(
+                userAreaItemLevels, basePower, card, characterUnit, supportUnit,
+                characterUnitAllMatch, supportUnitAllMatch, attrAllMatch
+            );
+            auto& power = (*multiUnitPower)[multiUnitPowerIndex(
+                characterUnitAllMatch, supportUnitAllMatch, attrAllMatch
+            )];
+            power = DeckCardPowerDetail{
+                base, areaItemBonus, characterBonus, fixtureBonus, gateBonus,
+                base + areaItemBonus + characterBonus + fixtureBonus + gateBonus
+            };
+            ret.max = std::max(ret.max, power.total);
+            ret.min = std::min(ret.min, power.total);
+        }
+    }
     return ret;
 }
 
@@ -127,6 +159,106 @@ int CardPowerCalculator::getAreaItemBonusPower(const std::vector<AreaItemLevel> 
     return total;
 }
 
+int CardPowerCalculator::getMultiUnitAreaItemBonusPower(
+    const std::vector<AreaItemLevel>& userAreaItemLevels,
+    const BasePower& basePower,
+    const Card& card,
+    int characterUnit,
+    int supportUnit,
+    bool characterUnitAllMatch,
+    bool supportUnitAllMatch,
+    bool attrAllMatch
+)
+{
+    enum Bucket : int { None = 0, Character, Multi, UnitBucket, SupportBucket, AttrBucket, AnyBucket, BucketCount };
+    struct RowPick { Bucket bucket; bool allMatch; };
+    std::vector<RowPick> picks(userAreaItemLevels.size(), RowPick{None, false});
+    std::array<std::array<float, 3>, BucketCount> buff{};
+    std::array<std::array<float, 3>, BucketCount> baseBuff{};
+    std::array<bool, BucketCount> present{};
+
+    for (size_t i = 0; i < userAreaItemLevels.size(); ++i) {
+        const auto& it = userAreaItemLevels[i];
+        RowPick pick{None, false};
+        if (it.targetGameCharacterId != 0) {
+            if (it.targetGameCharacterId == card.characterId)
+                pick.bucket = Character;
+        } else if (it.targetUnit == Enums::Unit::multi_unit) {
+            pick.bucket = Multi;
+        } else if (it.targetUnit != Enums::Unit::any) {
+            if (it.targetUnit == characterUnit)
+                pick = {UnitBucket, characterUnitAllMatch};
+            else if (supportUnit != Enums::Unit::none && it.targetUnit == supportUnit)
+                pick = {SupportBucket, supportUnitAllMatch};
+        } else if (it.targetCardAttr != Enums::Attr::any) {
+            if (it.targetCardAttr == card.attr)
+                pick = {AttrBucket, attrAllMatch};
+        } else {
+            pick.bucket = AnyBucket;
+        }
+        picks[i] = pick;
+        if (pick.bucket == None)
+            continue;
+        const float normal[3] = {
+            float(it.power1BonusRate), float(it.power2BonusRate), float(it.power3BonusRate)
+        };
+        const float allMatch[3] = {
+            float(it.power1AllMatchBonusRate), float(it.power2AllMatchBonusRate), float(it.power3AllMatchBonusRate)
+        };
+        present[pick.bucket] = true;
+        for (int k = 0; k < 3; ++k) {
+            buff[pick.bucket][k] += pick.allMatch ? allMatch[k] : normal[k];
+            baseBuff[pick.bucket][k] += normal[k];
+        }
+    }
+
+    auto sum3 = [](const std::array<float, 3>& value) {
+        return (value[0] + value[1]) + value[2];
+    };
+    std::array<bool, BucketCount> dropped{};
+    std::array<bool, BucketCount> useBaseRate{};
+    if (present[UnitBucket] && present[SupportBucket]) {
+        if (sum3(buff[UnitBucket]) < sum3(buff[SupportBucket]))
+            dropped[UnitBucket] = true;
+        else
+            dropped[SupportBucket] = true;
+    }
+    if (present[Multi]) {
+        Bucket selected = None;
+        if (present[UnitBucket] && !dropped[UnitBucket])
+            selected = UnitBucket;
+        else if (present[SupportBucket] && !dropped[SupportBucket])
+            selected = SupportBucket;
+        if (selected != None) {
+            const float extra = sum3(buff[selected]) - sum3(baseBuff[selected]);
+            if (extra >= sum3(buff[Multi]))
+                dropped[Multi] = true;
+            else
+                useBaseRate[selected] = true;
+        }
+    }
+
+    double areaItemBonus[3] = {0, 0, 0};
+    for (size_t i = 0; i < userAreaItemLevels.size(); ++i) {
+        const auto& pick = picks[i];
+        if (pick.bucket == None || dropped[pick.bucket])
+            continue;
+        const auto& it = userAreaItemLevels[i];
+        const bool allMatch = pick.allMatch && !useBaseRate[pick.bucket];
+        const double rates[3] = {
+            allMatch ? it.power1AllMatchBonusRate : it.power1BonusRate,
+            allMatch ? it.power2AllMatchBonusRate : it.power2BonusRate,
+            allMatch ? it.power3AllMatchBonusRate : it.power3BonusRate,
+        };
+        for (int k = 0; k < 3; ++k)
+            areaItemBonus[k] += rates[k] * 0.01 * basePower[k];
+    }
+    int total = 0;
+    for (int k = 0; k < 3; ++k)
+        total += std::floor(areaItemBonus[k]);
+    return total;
+}
+
 int CardPowerCalculator::getCharacterBonusPower(const BasePower &basePower, int characterId)
 {
     auto& characterRanks = dataProvider.masterData->characterRanks;
@@ -175,13 +307,20 @@ int CardPowerCalculator::getFixtureBonusPower(const BasePower &basePower, int ch
 
 int CardPowerCalculator::getGateBonusPower(const BasePower &basePower, const std::vector<MysekaiGateBonus> &userGateBonuses, const std::vector<int> &cardUnits)
 {
-    bool isOnlyPiapro = cardUnits.size() == 1 && cardUnits[0] == Enums::Unit::piapro;
-    double powerBonusRate = 0;
-    for (auto& bonus : userGateBonuses) {
-        if (isOnlyPiapro || std::find(cardUnits.begin(), cardUnits.end(), bonus.unit) != cardUnits.end()) {
-            powerBonusRate = std::max(powerBonusRate, bonus.powerBonusRate);
+    if (cardUnits.empty())
+        return 0;
+    const int unit = cardUnits.front();
+    const MysekaiGateBonus* selected = nullptr;
+    for (const auto& bonus : userGateBonuses) {
+        if (unit == Enums::Unit::piapro) {
+            if (selected == nullptr || bonus.level > selected->level)
+                selected = &bonus;
+        } else if (bonus.unit == unit) {
+            selected = &bonus;
+            break;
         }
     }
+    const double powerBonusRate = selected == nullptr ? 0.0 : selected->powerBonusRate;
     // 按各个综合分别计算加成，其中powerBonusRate单位是1%
     double total = sumPower(basePower) * powerBonusRate * 0.01;
     return std::floor(total);

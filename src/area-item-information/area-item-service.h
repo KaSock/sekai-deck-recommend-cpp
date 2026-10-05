@@ -20,7 +20,7 @@ public:
      * @param areaItemId 区域道具ID
      * @param level 等级
      */
-    AreaItemLevel getAreaItemLevel(int areaItemId, int level);
+    std::vector<AreaItemLevel> getAreaItemLevel(int areaItemId, int level);
 
     /**
      * 获取下一级区域道具
@@ -28,7 +28,7 @@ public:
      * @param areaItem 区域道具
      * @param areaItemLevel （可选）当前等级
      */
-    AreaItemLevel getAreaItemNextLevel(const AreaItem& areaItem, std::optional<AreaItemLevel> areaItemLevel = std::nullopt);
+    std::vector<AreaItemLevel> getAreaItemNextLevel(const AreaItem& areaItem, std::optional<int> currentLevel = std::nullopt);
 
     /**
      * 获取区域道具等级对应的ShopItem
@@ -37,7 +37,8 @@ public:
      * 目前只支持1～15级
      * @param areaItemLevel 区域道具等级
      */
-    ShopItem getShopItem(const AreaItemLevel& areaItemLevel);
+    ShopItem getShopItem(int areaItemId, int level);
+    static int getShopItemId(int areaItemId, int level);
 
 };
 

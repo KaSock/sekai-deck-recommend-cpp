@@ -374,7 +374,8 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
             eventId,
             config.skillReferenceChooseStrategy,
             config.keepAfterTrainingState,
-            bestSkillAsLeader
+            bestSkillAsLeader,
+            config.multiUnitBonusEvaluation
         );
     }
     else {
@@ -401,7 +402,8 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
             config.skillReferenceChooseStrategy,
             config.keepAfterTrainingState,
             bestSkillAsLeader,
-            /*slimPower=*/true
+            /*slimPower=*/true,
+            config.multiUnitBonusEvaluation
         );
     }
     return context.result;
@@ -430,7 +432,8 @@ RecommendDeck BaseDeckRecommend::materializeCandidate(
         config.skillReferenceChooseStrategy,
         config.keepAfterTrainingState,
         bestSkillAsLeader,
-        candidate.statusMask
+        candidate.statusMask,
+        config.multiUnitBonusEvaluation
     );
     return RecommendDeck(deckDetails.front(), config.target, candidate.score);
 }

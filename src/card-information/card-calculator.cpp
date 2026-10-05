@@ -1,6 +1,7 @@
 #include "card-information/card-calculator.h"
 #include "card-calculator.h"
 #include <bit>
+#include <utility>
 
 std::optional<CardDetail> CardCalculator::getCardDetail(
     const UserCard& userCard,
@@ -51,13 +52,14 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
 
     auto userCard0 = this->cardService.applyCardConfig(userCard, card, cfg);
     auto units = this->cardService.getCardUnits(card);
+    std::vector<DeckCardPowerDetail> multiUnitPower;
     uint16_t unitMask = 0;
     for (const auto unit : units)
         unitMask |= uint16_t{1} << unit;
     auto skill = this->skillCalculator.getCardSkill(userCard0, card, scoreUpLimit);
     auto power = this->powerCalculator.getCardPower(
         userCard0, card, units, userAreaItemLevels, hasCanvasBonus, userGateBonuses,
-        fixtureBonusLimit
+        fixtureBonusLimit, &multiUnitPower
     );
     std::array<std::array<int, 4>, 2> powerTotals{};
     int unitIndex = 0;
@@ -100,6 +102,9 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
         .attr = card.attr,
         .power = power,
         .powerTotals = powerTotals,
+        .multiUnitPower = std::move(multiUnitPower),
+        .characterUnit = units.back(),
+        .supportUnit = units.size() > 1 ? units.front() : Enums::Unit::none,
         .skill = skill,
         .maxEventBonus = eventBonus.maxBonus,
         .minEventBonus = eventBonus.minBonus,

@@ -1,5 +1,6 @@
 #include "deck-recommend/base-deck-recommend.h"
 
+#include <algorithm>
 #include <bit>
 #include <numeric>
 
@@ -225,6 +226,11 @@ void BaseDeckRecommend::findBestCardsDFS(
 
     auto& deckCards = dfsInfo.deckCards;
     auto& deckCharacters = dfsInfo.deckCharacters;
+    // The cached power bound does not include deck-dependent multi_unit rows.
+    const bool hasMultiUnitEffect = std::any_of(cardDetails.begin(), cardDetails.end(), [](const CardDetail* card) {
+        return !card->multiUnitPower.empty();
+    });
+    const bool scoreBoundEnabled = dfsInfo.scoreBound.enabled && !hasMultiUnitEffect;
     // 剪枝下界要判「队列已满」，必须把本轮的 limit 交给 dfsInfo；
     // 递归每层重复赋同一值无副作用
     dfsInfo.queueLimit = limit;
@@ -236,10 +242,20 @@ void BaseDeckRecommend::findBestCardsDFS(
     // 已经是完整卡组，计算当前卡组的值
     if (int(deckCards.size()) == member) {
         if (cfg.target == RecommendTarget::Power && dfsInfo.hasUsablePowerFloor(limit)) {
-            const bool useMixedUnitPower = member != 5 || dfsInfo.deckCommonUnitMask == 0;
+            const bool hasMultiUnitPower = std::any_of(deckCards.begin(), deckCards.end(), [](const CardDetail* card) {
+                return !card->multiUnitPower.empty();
+            });
+            const bool useMultiUnitPower = hasMultiUnitPower &&
+                cfg.multiUnitBonusEvaluation != MultiUnitBonusEvaluation::ForceOff &&
+                (cfg.multiUnitBonusEvaluation == MultiUnitBonusEvaluation::ForceOn ||
+                 this->deckCalculator.isMultiUnitDeck(deckCards));
+            const bool useMixedUnitPower = member != 5 ||
+                (dfsInfo.deckCommonUnitMask == 0 && !useMultiUnitPower);
             const auto power = useMixedUnitPower
                 ? honorBonus + dfsInfo.deckMixedUnitPowerTotals[member == 5 && dfsInfo.deckAllSameAttr]
-                : this->deckCalculator.getDeckTotalPowerByCards(deckCards, honorBonus);
+                : this->deckCalculator.getDeckTotalPowerByCards(
+                    deckCards, honorBonus, cfg.multiUnitBonusEvaluation
+                );
             if (power < dfsInfo.effectivePowerFloor()) {
                 return;
             }
@@ -289,7 +305,7 @@ void BaseDeckRecommend::findBestCardsDFS(
 
     // 分数对综合力、技能和活动加成单调；分别取严格上界后仍落后才可整枝。
     // 适用条件与与节点无关的加成上界由调用方一次算好，见 recommendHighScoreDeck。
-    if (dfsInfo.scoreBound.enabled && dfsInfo.hasUsableTargetFloor(limit)) {
+    if (scoreBoundEnabled && dfsInfo.hasUsableTargetFloor(limit)) {
         const int remaining = member - static_cast<int>(deckCards.size());
 
         // 最后一张卡时，按角色聚合和 partial_sort 都退化为取一个最大值。
@@ -501,7 +517,7 @@ void BaseDeckRecommend::findBestCardsDFS(
     auto cIndex = fixedCards.size() + cfg.fixedCharacters.size();
     FifthCardScoreBoundPrefix fifthCardScoreBoundPrefix{};
     const bool useFifthCardScoreBound =
-        dfsInfo.scoreBound.enabled &&
+        scoreBoundEnabled &&
         Enums::LiveType::isMulti(liveType) &&
         member == 5 &&
         deckCards.size() == 4;
@@ -637,7 +653,7 @@ void BaseDeckRecommend::findBestCardsDFS(
                 }
             }
             nextCards = &compatibleCards;
-            if (dfsInfo.scoreBound.enabled) {
+            if (scoreBoundEnabled) {
                 dfsInfo.compatibleScoreBoundIndex.build(
                     compatibleCards, dfsInfo.compatibleScoreBoundPowers,
                     dfsInfo.compatibleScoreBoundPowerTops
