@@ -142,6 +142,8 @@ class DeckRecommendOptions:
         fixed_cards (List[int]): List of card IDs that always included in the deck, default is None
         fixed_characters (List[int]): List of character IDs that always included in the deck (first is always leader), cannot used in challenge live, cannot used with fixed_cards together, default is None
         own_all_bonus_cards (bool): Treat all bonus cards (bonusRate > 0) of the event as owned, adding virtual cards to the pool, default is False
+        bonus_card_unit (str): Restrict virtual bonus cards to this unit when own_all_bonus_cards is set, default is None
+        bonus_card_attr (str): Restrict virtual bonus cards to this attribute when own_all_bonus_cards is set, default is None
         bonus_card_config (DeckRecommendCardConfig): Card config applied to every bonus card when own_all_bonus_cards is set (entries in single_card_configs take precedence), default is level_max/episode_read only
         target_bonus_list (List[int]): List of target event bonus, required when target is "bonus"
         skill_reference_choose_strategy (str): Strategy for bfes skill reference choose in ["average", "max", "min"], default is "average"
@@ -191,6 +193,8 @@ class DeckRecommendOptions:
     fixed_cards: Optional[List[int]]
     fixed_characters: Optional[List[int]]
     own_all_bonus_cards: Optional[bool]
+    bonus_card_unit: Optional[str]
+    bonus_card_attr: Optional[str]
     bonus_card_config: Optional[DeckRecommendCardConfig]
     target_bonus_list: Optional[List[int]]
     skill_reference_choose_strategy: Optional[str]

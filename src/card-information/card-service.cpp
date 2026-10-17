@@ -1,6 +1,6 @@
 #include "card-information/card-service.h"
 
-std::vector<int> CardService::getCardUnits(const Card &card)
+std::vector<int> CardService::getCardUnits(const Card &card) const
 {
     auto& gameCharacters = dataProvider.masterData->gameCharacters;
     // 组合（V家支援组合、角色原始组合）

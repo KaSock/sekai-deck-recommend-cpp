@@ -24,7 +24,7 @@ public:
      * 获得卡牌组合信息（包括原始组合与应援组合）
      * @param card 卡牌
      */
-    std::vector<int> getCardUnits(const Card& card);
+    std::vector<int> getCardUnits(const Card& card) const;
 
     /**
      * 应用卡牌设置

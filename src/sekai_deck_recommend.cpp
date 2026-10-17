@@ -496,6 +496,8 @@ struct PyDeckRecommendOptions {
     std::optional<std::vector<int>> fixed_cards;
     std::optional<std::vector<int>> fixed_characters;
     std::optional<bool> own_all_bonus_cards;
+    std::optional<std::string> bonus_card_unit;
+    std::optional<std::string> bonus_card_attr;
     std::optional<PyCardConfig> bonus_card_config;
     std::optional<std::vector<int>> target_bonus_list;
     std::optional<std::string> skill_reference_choose_strategy;
@@ -575,6 +577,10 @@ struct PyDeckRecommendOptions {
             result["fixed_characters"] = fixed_characters.value();
         if (own_all_bonus_cards.has_value())
             result["own_all_bonus_cards"] = own_all_bonus_cards.value();
+        if (bonus_card_unit.has_value())
+            result["bonus_card_unit"] = bonus_card_unit.value();
+        if (bonus_card_attr.has_value())
+            result["bonus_card_attr"] = bonus_card_attr.value();
         if (bonus_card_config.has_value())
             result["bonus_card_config"] = bonus_card_config->to_dict();
         if (target_bonus_list.has_value())
@@ -666,6 +672,10 @@ struct PyDeckRecommendOptions {
             options.fixed_characters = dict["fixed_characters"].cast<std::vector<int>>();
         if (dict.contains("own_all_bonus_cards"))
             options.own_all_bonus_cards = dict["own_all_bonus_cards"].cast<bool>();
+        if (dict.contains("bonus_card_unit"))
+            options.bonus_card_unit = dict["bonus_card_unit"].cast<std::string>();
+        if (dict.contains("bonus_card_attr"))
+            options.bonus_card_attr = dict["bonus_card_attr"].cast<std::string>();
         if (dict.contains("bonus_card_config"))
             options.bonus_card_config = PyCardConfig::from_dict(dict["bonus_card_config"].cast<py::dict>());
         if (dict.contains("target_bonus_list"))
@@ -1228,6 +1238,16 @@ class SekaiDeckRecommend {
 
             // 全当期
             config.ownAllBonusCards = pyoptions.own_all_bonus_cards.value_or(false);
+            if (pyoptions.bonus_card_unit.has_value()) {
+                if (!VALID_UNIT_TYPES.count(pyoptions.bonus_card_unit.value()))
+                    throw std::invalid_argument("Invalid bonus card unit: " + pyoptions.bonus_card_unit.value());
+                config.bonusCardUnit = mapEnum(EnumMap::unit, pyoptions.bonus_card_unit.value());
+            }
+            if (pyoptions.bonus_card_attr.has_value()) {
+                if (!VALID_EVENT_ATTRS.count(pyoptions.bonus_card_attr.value()))
+                    throw std::invalid_argument("Invalid bonus card attr: " + pyoptions.bonus_card_attr.value());
+                config.bonusCardAttr = mapEnum(EnumMap::attr, pyoptions.bonus_card_attr.value());
+            }
             if (pyoptions.bonus_card_config.has_value()) {
                 const auto& bonus = pyoptions.bonus_card_config.value();
                 if (bonus.disable.has_value())
@@ -1827,6 +1847,8 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("fixed_cards", &PyDeckRecommendOptions::fixed_cards)
         .def_readwrite("fixed_characters", &PyDeckRecommendOptions::fixed_characters)
         .def_readwrite("own_all_bonus_cards", &PyDeckRecommendOptions::own_all_bonus_cards)
+        .def_readwrite("bonus_card_unit", &PyDeckRecommendOptions::bonus_card_unit)
+        .def_readwrite("bonus_card_attr", &PyDeckRecommendOptions::bonus_card_attr)
         .def_readwrite("bonus_card_config", &PyDeckRecommendOptions::bonus_card_config)
         .def_readwrite("target_bonus_list", &PyDeckRecommendOptions::target_bonus_list)
         .def_readwrite("skill_reference_choose_strategy", &PyDeckRecommendOptions::skill_reference_choose_strategy)
@@ -2029,6 +2051,8 @@ PyDeckRecommendOptions optionsFromJson(const json& data, const std::string& user
     readOptional(data, "fixed_cards", options.fixed_cards);
     readOptional(data, "fixed_characters", options.fixed_characters);
     readOptional(data, "own_all_bonus_cards", options.own_all_bonus_cards);
+    readOptional(data, "bonus_card_unit", options.bonus_card_unit);
+    readOptional(data, "bonus_card_attr", options.bonus_card_attr);
     readCardConfig("bonus_card_config", options.bonus_card_config);
     readOptional(data, "target_bonus_list", options.target_bonus_list);
     readOptional(data, "skill_reference_choose_strategy", options.skill_reference_choose_strategy);

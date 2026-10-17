@@ -72,6 +72,10 @@ struct DeckRecommendConfig {
 
     // 全当期：视为拥有本活动全部加成卡（bonusRate>0）加入卡池，由算法自行取舍
     bool ownAllBonusCards = false;
+    // 全当期虚拟卡的组合限制；未设置时保留全部活动加成卡
+    std::optional<int> bonusCardUnit = std::nullopt;
+    // 全当期虚拟卡的属性限制；未设置时保留全部活动加成卡
+    std::optional<int> bonusCardAttr = std::nullopt;
     // 全当期卡统一套用的单卡配置，与普通单卡配置同构（singleCardConfig 里的显式配置优先）
     CardConfig bonusCardConfig = {.rankMax = true, .episodeRead = true};
 

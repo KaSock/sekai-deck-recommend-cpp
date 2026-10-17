@@ -603,6 +603,28 @@ void BaseDeckRecommend::addEventBonusCardsToPool(
     for (const auto& eventCard : this->dataProvider.masterData->eventCards) {
         if (eventCard.eventId != eventId || eventCard.bonusRate <= 0)
             continue;
+        if (config.bonusCardUnit.has_value() || config.bonusCardAttr.has_value()) {
+            const auto cardIt = std::find_if(
+                this->dataProvider.masterData->cards.begin(),
+                this->dataProvider.masterData->cards.end(),
+                [&](const Card& card) { return card.id == eventCard.cardId; }
+            );
+            if (cardIt == this->dataProvider.masterData->cards.end())
+                continue;
+            if (config.bonusCardAttr.has_value()
+                && cardIt->attr != config.bonusCardAttr.value())
+                continue;
+            if (config.bonusCardUnit.has_value()) {
+                const auto units = this->cardService.getCardUnits(*cardIt);
+                const auto characterUnit = units.back();
+                const auto unit = config.bonusCardUnit.value();
+                const bool unitMatches = unit == Enums::Unit::piapro
+                    ? characterUnit == unit
+                    : std::find(units.begin(), units.end(), unit) != units.end();
+                if (!unitMatches)
+                    continue;
+            }
+        }
         // 显式指定的单卡配置优先，不使用全当期的统一配置；但无论是否显式配置，
         // 全当期都必须确保未拥有的活动卡被加入虚拟卡池。
         if (!config.singleCardConfig.count(eventCard.cardId))
