@@ -118,6 +118,8 @@ options.live_type = "multi"
 options.music_id = 74
 options.music_diff = "expert"
 options.event_id = 160
+# Or simulate a marathon memory event: all attributes +25%, the selected unit +75%.
+# options.event_me_unit = "street"
 
 result = sekai_deck_recommend.recommend(options)
 ```

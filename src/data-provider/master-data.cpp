@@ -689,6 +689,37 @@ void MasterData::addFakeEvent(int eventType) {
         noEvent.eventType = eventType;
         events.push_back(noEvent);
 
+        // Memory events: every attribute gets 25%, native unit characters get 75%.
+        // Virtual singers keep their associated-unit filtering in CardEventCalculator.
+        if (eventType == Enums::EventType::marathon) {
+            for (const auto unit : Enums::Unit::specificUnits) {
+                Event event;
+                event.id = getMemoryEventFakeEventId(unit);
+                event.eventType = eventType;
+                events.push_back(event);
+
+                eventDeckBonuses.push_back(EventDeckBonus{
+                    .eventId = event.id,
+                    .cardAttr = Enums::Attr::null,
+                    .bonusRate = 25.0,
+                });
+                for (const auto& character : gameCharacters) {
+                    if (character.unit != unit)
+                        continue;
+                    for (const auto& characterUnit : gameCharacterUnits) {
+                        if (characterUnit.gameCharacterId != character.id)
+                            continue;
+                        eventDeckBonuses.push_back(EventDeckBonus{
+                            .eventId = event.id,
+                            .gameCharacterUnitId = characterUnit.id,
+                            .cardAttr = Enums::Attr::null,
+                            .bonusRate = 75.0,
+                        });
+                    }
+                }
+            }
+        }
+
         // 指定团名+指定颜色组卡
         for (auto unit : Enums::Unit::specificUnits) {
             for (auto attr : Enums::Attr::specificAttrs) {
@@ -741,6 +772,14 @@ int MasterData::getUnitAttrFakeEventId(int eventType, int unit, int attr) const
         throw std::invalid_argument("Not supported event type for fake event");
     }
     return 1000000 + unit * 100 + attr + eventType * 100000;
+}
+
+int MasterData::getMemoryEventFakeEventId(int unit) const
+{
+    const auto& units = Enums::Unit::specificUnits;
+    if (std::find(units.begin(), units.end(), unit) == units.end())
+        throw std::invalid_argument("Invalid memory event unit: " + std::to_string(unit));
+    return 4000000 + unit;
 }
 
 int MasterData::getWorldBloomFakeEventId(int worldBloomTurn, int unitOrGroup) const

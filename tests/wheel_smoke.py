@@ -27,6 +27,12 @@ def main() -> None:
     }
     assert DeckRecommendOptions.from_dict(options.to_dict()).to_dict() == options.to_dict()
 
+    memory_options = DeckRecommendOptions()
+    memory_options.event_me_unit = "street"
+    assert DeckRecommendOptions.from_dict(memory_options.to_dict()).to_dict() == {
+        "event_me_unit": "street",
+    }
+
     options.algorithms = ["dfs", "ga"]
     options.parallel_algorithms = True
     assert DeckRecommendOptions.from_dict(options.to_dict()).to_dict() == options.to_dict()

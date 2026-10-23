@@ -476,6 +476,7 @@ struct PyDeckRecommendOptions {
     std::optional<int> music_id;
     std::optional<std::string> music_diff;
     std::optional<int> event_id;
+    std::optional<std::string> event_me_unit;
     std::optional<std::string> event_attr;
     std::optional<std::string> event_unit;
     std::optional<std::string> event_type;
@@ -539,6 +540,7 @@ struct PyDeckRecommendOptions {
         if (music_id.has_value())              result["music_id"] = music_id.value();
         if (music_diff.has_value())            result["music_diff"] = music_diff.value();
         if (event_id.has_value())              result["event_id"] = event_id.value();
+        if (event_me_unit.has_value())         result["event_me_unit"] = event_me_unit.value();
         if (event_attr.has_value())            result["event_attr"] = event_attr.value();
         if (event_unit.has_value())            result["event_unit"] = event_unit.value();
         if (event_type.has_value())            result["event_type"] = event_type.value();
@@ -632,6 +634,7 @@ struct PyDeckRecommendOptions {
         if (dict.contains("music_id"))              options.music_id = dict["music_id"].cast<int>();
         if (dict.contains("music_diff"))            options.music_diff = dict["music_diff"].cast<std::string>();
         if (dict.contains("event_id"))              options.event_id = dict["event_id"].cast<int>();
+        if (dict.contains("event_me_unit"))         options.event_me_unit = dict["event_me_unit"].cast<std::string>();
         if (dict.contains("event_attr"))            options.event_attr = dict["event_attr"].cast<std::string>();
         if (dict.contains("event_unit"))            options.event_unit = dict["event_unit"].cast<std::string>();
         if (dict.contains("event_type"))            options.event_type = dict["event_type"].cast<std::string>();
@@ -1022,7 +1025,25 @@ class SekaiDeckRecommend {
         bool is_challenge_live = Enums::LiveType::isChallenge(options.liveType);
         
         // eventId
-        if (pyoptions.event_id.has_value()) {
+        if (pyoptions.event_me_unit.has_value() && (
+            is_challenge_live || pyoptions.event_id.has_value()
+            || pyoptions.event_attr.has_value() || pyoptions.event_unit.has_value()
+            || pyoptions.world_bloom_event_turn.has_value()
+            || pyoptions.world_bloom_event_group.has_value()
+            || pyoptions.world_bloom_character_id.has_value()
+            || pyoptions.event_type.value_or("marathon") != "marathon")) {
+            throw std::invalid_argument(
+                "event_me_unit requires a marathon simulation without other event selectors."
+            );
+        }
+        if (pyoptions.event_me_unit.has_value()) {
+            if (!VALID_UNIT_TYPES.count(*pyoptions.event_me_unit))
+                throw std::invalid_argument("Invalid memory event unit: " + *pyoptions.event_me_unit);
+            options.eventId = options.dataProvider.masterData->getMemoryEventFakeEventId(
+                mapEnum(EnumMap::unit, *pyoptions.event_me_unit)
+            );
+        }
+        else if (pyoptions.event_id.has_value()) {
             if (is_challenge_live)
                 throw std::invalid_argument("event_id is not valid for challenge live.");
             options.eventId = pyoptions.event_id.value();
@@ -1125,6 +1146,7 @@ class SekaiDeckRecommend {
 
             if (config.target == RecommendTarget::Bonus &&
                 !pyoptions.event_id.has_value() &&
+                !pyoptions.event_me_unit.has_value() &&
                 !pyoptions.world_bloom_event_turn.has_value() &&
                 !pyoptions.event_attr.has_value() &&
                 !pyoptions.event_unit.has_value()) {
@@ -1827,6 +1849,7 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("music_id", &PyDeckRecommendOptions::music_id)
         .def_readwrite("music_diff", &PyDeckRecommendOptions::music_diff)
         .def_readwrite("event_id", &PyDeckRecommendOptions::event_id)
+        .def_readwrite("event_me_unit", &PyDeckRecommendOptions::event_me_unit)
         .def_readwrite("event_attr", &PyDeckRecommendOptions::event_attr)
         .def_readwrite("event_unit", &PyDeckRecommendOptions::event_unit)
         .def_readwrite("event_type", &PyDeckRecommendOptions::event_type)
@@ -2018,6 +2041,7 @@ PyDeckRecommendOptions optionsFromJson(const json& data, const std::string& user
     readOptional(data, "music_id", options.music_id);
     readOptional(data, "music_diff", options.music_diff);
     readOptional(data, "event_id", options.event_id);
+    readOptional(data, "event_me_unit", options.event_me_unit);
     readOptional(data, "event_attr", options.event_attr);
     readOptional(data, "event_unit", options.event_unit);
     readOptional(data, "event_type", options.event_type);
